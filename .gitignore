@@ -1,0 +1,11 @@
+.DS_Store
+venv/
+.env
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+data/raw/*.edf
+data/raw/*.seizures
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!models/.gitkeep
