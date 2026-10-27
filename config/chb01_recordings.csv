@@ -1,0 +1,12 @@
+filename,split,annotation_source
+chb01_01.edf,train,data/raw/chb01-summary.txt
+chb01_03.edf,train,data/raw/chb01-summary.txt
+chb01_04.edf,train,data/raw/chb01-summary.txt
+chb01_14.edf,train,data/raw/chb01-summary.txt
+chb01_15.edf,train,data/raw/chb01-summary.txt
+chb01_16.edf,train,data/raw/chb01-summary.txt
+chb01_17.edf,validation,data/raw/chb01-summary.txt
+chb01_18.edf,validation,data/raw/chb01-summary.txt
+chb01_21.edf,test,data/raw/chb01-summary.txt
+chb01_22.edf,test,data/raw/chb01-summary.txt
+chb01_26.edf,test,data/raw/chb01-summary.txt

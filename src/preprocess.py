@@ -1,331 +1,270 @@
-"""
-================================================================================
-MODULE: src/preprocess.py
-PROJECT: Seizure Prediction via Failure Analysis (NYAS BrainTech Challenge)
-DESCRIPTION:
-    End-to-end signal processing and feature engineering pipeline for the
-    CHB-MIT Scalp EEG Database. This script:
-      1. Parses 'chb01-summary.txt' to automatically locate seizure timestamps.
-      2. Loads raw .edf brainwave recordings using MNE-Python.
-      3. Applies a 60 Hz Notch filter and a 0.5-45 Hz Butterworth Bandpass filter.
-      4. Slices recordings into 5-second epochs (with configurable stride).
-      5. Extracts 7 temporal & spectral features across 18 EEG channels (126 total).
-      6. Saves clean, structured training and testing datasets to 'data/processed/'.
-================================================================================
+"""Extract patient-specific seizure DETECTION features from explicitly selected EDFs.
+
+Labels describe [start, end) windows: >=50% annotated ictal overlap is positive.
+The original preictal pipeline is preserved in Git commit 4454197.
+Run from the repository root: venv/bin/python src/preprocess.py --help
 """
 
-# ==============================================================================
-# 1. IMPORTS & LIBRARY SETUP
-# ==============================================================================
-import os                   # Interacting with Mac file paths (data/raw, data/processed)
-import re                   # Regular expressions for parsing the doctor's summary text file
-import warnings             # Suppressing non-critical MNE channel naming warnings
-import numpy as np          # High-speed linear algebra and matrix manipulation
-import pandas as pd         # Structuring our 126 features into tabular DataFrames
-import mne                  # Neuroimaging library for reading and filtering .edf files
-from scipy.signal import welch  # Welch's method for Power Spectral Density (FFT)
+import argparse
+import hashlib
+import importlib.metadata
+import json
+import platform
+from pathlib import Path
+import re
+import warnings
 
-# Silence standard MNE console clutter so we only see our custom progress messages
-warnings.filterwarnings("ignore")
-mne.set_log_level("ERROR")
+import mne
+import numpy as np
+import pandas as pd
+from scipy.signal import butter, sosfilt, welch
 
-
-# ==============================================================================
-# 2. GLOBAL SIGNAL PROCESSING CONSTANTS
-# ==============================================================================
-RAW_DATA_DIR = os.path.join("data", "raw")
-PROCESSED_DATA_DIR = os.path.join("data", "processed")
-
-NUM_CHANNELS = 18           # Standardize to 18 common bipolar channels across recordings
-WINDOW_SEC = 5.0            # Length of each brainwave snapshot (5 seconds = 1,280 samples at 256 Hz)
-PREICTAL_HORIZON_SEC = 1800 # 30 minutes (1,800 seconds) prior to seizure onset = Warning Zone (Class 1)
-
-# Canonical neurological EEG frequency bands (in Hertz)
-FREQ_BANDS = {
-    "delta": (0.5, 4.0),    # Deep sleep / slow-wave abnormalities
-    "theta": (4.0, 8.0),    # Drowsiness / early focal slowing
-    "alpha": (8.0, 13.0),   # Relaxed wakefulness
-    "beta":  (13.0, 30.0),  # Active thinking / motor cortex activity
-    "gamma": (30.0, 45.0),  # High-frequency neural synchronization (key preictal marker)
-}
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RECORDINGS = ("chb01_01.edf", "chb01_03.edf", "chb01_04.edf")
+WINDOW_SEC = 5.0
+FILTER_WARMUP_SEC = 10.0  # Flag, not discard: this is a pragmatic QC interval.
+POWER_FLOOR_UV2 = 1e-12
+PROCESSING_VERSION = "detection-v1"
+CHANNELS = (
+    "FP1-F7", "F7-T7", "T7-P7", "P7-O1", "FP1-F3", "F3-C3",
+    "C3-P3", "P3-O1", "FP2-F4", "F4-C4", "C4-P4", "P4-O2",
+    "FP2-F8", "F8-T8", "T8-P8", "P8-O2", "FZ-CZ", "CZ-PZ",
+)
+FREQ_BANDS = {"delta": (0.5, 4), "theta": (4, 8), "alpha": (8, 13),
+              "beta": (13, 30), "gamma": (30, 45)}
+STAT_NAMES = ("var", "line_length", *FREQ_BANDS)
+FEATURE_COLUMNS = [f"{ch}_{stat}" for ch in CHANNELS for stat in STAT_NAMES]
 
 
-# ==============================================================================
-# 3. SUMMARY FILE PARSER
-# ==============================================================================
+def validate_seizures(intervals, duration_sec=None):
+    """Reject malformed annotations rather than silently creating normal labels."""
+    previous_end = -1.0
+    for start, end in intervals:
+        if not np.isfinite([start, end]).all() or not 0 <= start < end:
+            raise ValueError(f"Invalid seizure interval: {(start, end)}")
+        if start < previous_end:
+            raise ValueError("Seizure intervals must be ordered and nonoverlapping")
+        if duration_sec is not None and end > duration_sec:
+            raise ValueError(f"Seizure ends at {end}, beyond recording length {duration_sec}")
+        previous_end = end
+
+
 def parse_summary_file(summary_path):
+    """Read unnumbered or numbered seizure pairs, checking declared event counts."""
+    seizures = {}
+    filename, count, pending = None, None, None
+
+    def finish_recording():
+        if filename is not None:
+            if pending is not None or count is None or len(seizures[filename]) != count:
+                raise ValueError(f"Incomplete annotations/count mismatch for {filename}")
+            validate_seizures(seizures[filename])
+
+    for raw_line in Path(summary_path).read_text().splitlines():
+        line = raw_line.strip()
+        if line.startswith("File Name:"):
+            finish_recording()
+            filename = line.split(":", 1)[1].strip()
+            if not filename or filename in seizures:
+                raise ValueError(f"Missing or duplicate recording name: {filename}")
+            seizures[filename] = []
+            count, pending = None, None
+        elif line.startswith("Number of Seizures in File:"):
+            if filename is None or count is not None:
+                raise ValueError("Misplaced or repeated seizure count")
+            count = int(line.split(":", 1)[1])
+            if count < 0:
+                raise ValueError("Negative seizure count")
+        elif line.startswith("Seizure") and ("Start Time:" in line or "End Time:" in line):
+            match = re.fullmatch(r"Seizure(?: (\d+))? (Start|End) Time: (\d+(?:\.\d+)?) seconds", line)
+            if filename is None or match is None:
+                raise ValueError(f"Malformed annotation: {line}")
+            number, kind, seconds = match.groups()
+            if kind == "Start":
+                if pending is not None:
+                    raise ValueError(f"Unpaired seizure start in {filename}")
+                pending = (number, float(seconds))
+            else:
+                if pending is None or pending[0] != number:
+                    raise ValueError(f"Unpaired/mismatched seizure end in {filename}")
+                seizures[filename].append((pending[1], float(seconds)))
+                pending = None
+    finish_recording()
+    if not seizures:
+        raise ValueError("Summary contains no recording annotations")
+    return seizures
+
+
+def select_channels(names):
+    """Use a fixed bipolar order; explicitly resolve CHB-MIT's duplicate T8-P8."""
+    selected = []
+    for channel in CHANNELS:
+        if names.count(channel) == 1:
+            selected.append(channel)
+        elif channel == "T8-P8" and "T8-P8-0" in names and "T8-P8-1" in names:
+            # MNE numbers duplicate EDF labels in original order. Keep the first.
+            warnings.warn("Using first duplicate T8-P8 signal (T8-P8-0)", UserWarning)
+            selected.append("T8-P8-0")
+        else:
+            raise ValueError(f"Missing or ambiguous required bipolar channel: {channel}")
+    return selected
+
+
+def causal_bandpass(data, sfreq):
+    """Filter the complete file forward once, with fresh zero state for each file.
+
+    Keeping state across all samples avoids per-window edge artifacts. No future
+    samples are used. A 60 Hz notch is omitted because features stop at 45 Hz.
     """
-    Reads the hospital 'chb01-summary.txt' file and extracts exact seizure start
-    and end times (in seconds) for every .edf recording.
-
-    Parameters:
-        summary_path (str): Path to the *-summary.txt file.
-
-    Returns:
-        seizure_dict (dict): Maps filename -> list of (start_sec, end_sec) tuples.
-                             Example: {'chb01_03.edf': [(2996, 3036)], 'chb01_01.edf': []}
-    """
-    seizure_dict = {}
-    current_file = None
-    start_time = None
-
-    with open(summary_path, "r") as f:
-        for line in f:
-            line = line.strip()
-
-            # Match lines like: "File Name: chb01_03.edf"
-            if line.startswith("File Name:"):
-                current_file = line.split(":")[1].strip()
-                seizure_dict[current_file] = []
-
-            # Match lines like: "Seizure Start Time: 2996 seconds" or "Seizure 1 Start Time: ..."
-            elif "Start Time:" in line and "Seizure" in line:
-                # Extract the integer number of seconds using regex
-                match = re.search(r"(\d+)\s*seconds", line)
-                if match:
-                    start_time = int(match.group(1))
-
-            # Match lines like: "Seizure End Time: 3036 seconds"
-            elif "End Time:" in line and "Seizure" in line:
-                match = re.search(r"(\d+)\s*seconds", line)
-                if match and current_file is not None and start_time is not None:
-                    end_time = int(match.group(1))
-                    seizure_dict[current_file].append((start_time, end_time))
-                    start_time = None
-
-    return seizure_dict
+    if not np.isfinite(sfreq) or sfreq <= 90:
+        raise ValueError("Sampling frequency must exceed twice the 45 Hz cutoff")
+    if data.ndim != 2 or data.shape[1] == 0 or not np.isfinite(data).all():
+        raise ValueError("EEG must be a finite channels-by-samples matrix")
+    sos = butter(4, [0.5, 45.0], btype="bandpass", fs=sfreq, output="sos")
+    return sosfilt(sos, data, axis=1)
 
 
-# ==============================================================================
-# 4. SIGNAL INGESTION & DIGITAL FILTERING
-# ==============================================================================
 def load_and_filter_edf(edf_path):
-    """
-    Loads a raw .edf file into memory, standardizes the 18 bipolar channels,
-    and removes electromagnetic + muscle noise using digital filters.
-
-    Parameters:
-        edf_path (str): Full path to the .edf file.
-
-    Returns:
-        data (np.ndarray): Filtered 2D voltage matrix of shape (18_channels, N_samples).
-        sfreq (float): Sampling frequency in Hz (256.0 Hz for CHB-MIT).
-        ch_names (list): List of the 18 selected channel names.
-    """
-    # preload=True loads the full voltage matrix into RAM so we can filter it fast
-    raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)
-
-    # Clean up duplicate channel names that MNE appends '-0' or '-1' to (like T8-P8-0)
-    # and pick the first 18 valid EEG channels so every file has identical dimensions
-    clean_channels = [ch for ch in raw.ch_names if ch != "-" and not ch.startswith("STI")]
-    selected_channels = clean_channels[:NUM_CHANNELS]
-    raw.pick(selected_channels)
-
-    # 1. Notch Filter at 60 Hz: Removes US hospital electrical wall-outlet hum
-    raw.notch_filter(freqs=60.0, verbose=False)
-
-    # 2. Butterworth Bandpass Filter (0.5 Hz to 45.0 Hz):
-    #    - Cuts < 0.5 Hz to remove slow sweat/breathing baseline drift
-    #    - Cuts > 45.0 Hz to remove high-frequency jaw/muscle (EMG) clenching noise
-    raw.filter(l_freq=0.5, h_freq=45.0, method="iir", verbose=False)
-
-    # Extract the underlying 2D NumPy matrix: shape (18, total_time_samples)
-    # Multiply by 1e6 to convert Volts (V) to Microvolts (uV) so numbers aren't tiny (10^-12)
-    data = raw.get_data() * 1e6
-    sfreq = float(raw.info["sfreq"])
-
-    return data, sfreq, selected_channels
+    with mne.io.read_raw_edf(edf_path, preload=False, verbose="WARNING") as raw:
+        selected = select_channels(raw.ch_names)
+        sfreq = float(raw.info["sfreq"])
+        # Read only the selected bipolar EEG; MNE converts EDF amplitudes to volts.
+        data = raw.get_data(picks=selected) * 1e6
+    return causal_bandpass(data, sfreq), sfreq, selected
 
 
-# ==============================================================================
-# 5. VECTORIZED MATHEMATICAL FEATURE EXTRACTION (126 FEATURES)
-# ==============================================================================
 def extract_epoch_features(epoch_matrix, sfreq):
-    """
-    Converts a single 5-second multi-channel brainwave clip into a 1D vector
-    of 126 mathematical features (18 channels x 7 features per channel).
-
-    Parameters:
-        epoch_matrix (np.ndarray): Shape (18, 1280) representing 5s of 18-channel EEG.
-        sfreq (float): Sampling rate (256.0 Hz).
-
-    Returns:
-        feature_vector (np.ndarray): 1D array of 126 floats.
-    """
-    # --- FEATURE 1: Signal Variance (Hjorth Activity / "Loudness") ---
-    # Computed simultaneously across all 18 channels along the time axis (axis=1)
-    variance = np.var(epoch_matrix, axis=1)  # Shape: (18,)
-
-    # --- FEATURE 2: Line Length ("Squiggliness" / Waveform Complexity) ---
-    # Sum of absolute voltage jumps between adjacent time points: sum(|x[i] - x[i-1]|)
-    line_length = np.sum(np.abs(np.diff(epoch_matrix, axis=1)), axis=1)  # Shape: (18,)
-
-    # --- FEATURES 3 to 7: Relative Spectral Band Powers (Welch's PSD) ---
-    # nperseg = 2 seconds (512 samples) gives 0.5 Hz frequency resolution
-    freqs, psd = welch(epoch_matrix, fs=sfreq, nperseg=int(sfreq * 2), axis=1)
-
-    # Calculate total spectral power between 0.5 and 45 Hz for normalization
-    total_mask = (freqs >= 0.5) & (freqs <= 45.0)
-    total_power = np.trapezoid(psd[:, total_mask], freqs[total_mask], axis=1)
-    # Prevent division by zero if a sensor flatlines
-    total_power = np.where(total_power == 0, 1e-12, total_power)
-
-    band_powers = []
-    for band_name, (low_f, high_f) in FREQ_BANDS.items():
-        band_mask = (freqs >= low_f) & (freqs < high_f)
-        # Integrate area under the PSD curve for this specific frequency band
-        abs_power = np.trapezoid(psd[:, band_mask], freqs[band_mask], axis=1)
-        # Convert to Relative Power (0.0 to 1.0 ratio of total brainwave energy)
-        rel_power = abs_power / total_power
-        band_powers.append(rel_power)  # Each is shape (18,)
-
-    # Stack all 7 feature arrays per channel: shape (18_channels, 7_features)
-    # Order per channel: [Variance, LineLength, Delta, Theta, Alpha, Beta, Gamma]
-    channel_features = np.column_stack([variance, line_length] + band_powers)
-
-    # Flatten into a single row of 126 numbers: [Ch1_Var, Ch1_LL, ..., Ch18_Gamma]
-    return channel_features.flatten()
+    """Return 7 features/channel and the number of near-zero-power channels."""
+    if (epoch_matrix.ndim != 2 or epoch_matrix.shape[0] != len(CHANNELS)
+            or epoch_matrix.shape[1] != round(WINDOW_SEC * sfreq)
+            or not np.isfinite(epoch_matrix).all()):
+        raise ValueError("Expected a finite, complete five-second 18-channel window")
+    freqs, psd = welch(epoch_matrix, fs=sfreq, nperseg=round(sfreq * 2),
+                       window="hann", noverlap=round(sfreq), detrend="constant", axis=1)
+    # Identical bin integration in numerator and denominator partitions all power.
+    # Bands are half-open, except gamma includes the final 45 Hz bin.
+    dfreq = freqs[1] - freqs[0]
+    total = psd[:, (freqs >= 0.5) & (freqs <= 45)].sum(axis=1) * dfreq
+    low_power = total <= POWER_FLOOR_UV2
+    relative = []
+    for name, (low, high) in FREQ_BANDS.items():
+        mask = (freqs >= low) & ((freqs <= high) if name == "gamma" else (freqs < high))
+        power = psd[:, mask].sum(axis=1) * dfreq
+        relative.append(np.divide(power, total, out=np.zeros_like(total), where=~low_power))
+    features = np.column_stack((np.var(epoch_matrix, axis=1),
+                               np.abs(np.diff(epoch_matrix, axis=1)).sum(axis=1), *relative))
+    if not np.isfinite(features).all():
+        raise ValueError("Nonfinite extracted features")
+    return features.ravel(), int(low_power.sum())
 
 
-# ==============================================================================
-# 6. TIME-AWARE SLIDING WINDOW SLICER
-# ==============================================================================
-def slice_and_extract(edf_filename, seizure_times, stride_sec=5.0, role="train"):
-    """
-    Slices a continuous recording into 5-second windows, assigns ground-truth
-    clinical labels (0 = Interictal Normal, 1 = Preictal Warning), and extracts
-    the 126 features for each window.
+def window_bounds(n_samples, sfreq):
+    """Tile integer sample bounds; warn about an incomplete final window."""
+    if not np.isfinite(sfreq) or sfreq <= 90:
+        raise ValueError("Sampling frequency must be finite and >90 Hz")
+    exact = WINDOW_SEC * sfreq
+    size = round(exact)
+    if not np.isfinite(sfreq) or sfreq <= 90 or not np.isclose(size, exact, rtol=0, atol=1e-9):
+        raise ValueError("Five seconds must contain an integer number of samples at sfreq >90 Hz")
+    if n_samples < size:
+        raise ValueError("Recording is shorter than one complete window")
+    if n_samples % size:
+        warnings.warn(f"Dropping {n_samples % size} trailing samples (incomplete window)")
+    return [(start, start + size) for start in range(0, n_samples - size + 1, size)]
 
-    Scientific Labeling Logic:
-      - If the file has NO seizures (e.g., chb01_01.edf):
-          Every 5-second window is labeled Class 0 (Interictal).
-      - If the file HAS a seizure starting at t_onset (e.g., chb01_03.edf at 2996s):
-          1. Windows before (t_onset - 1800s) -> Labeled Class 0 (Interictal).
-          2. Windows inside [t_onset - 1800s, t_onset] -> Labeled Class 1 (Preictal).
-          3. Windows during/after t_onset -> DISCARDED (Ictal/Postictal excluded
-             so the AI learns to predict future seizures, not detect active ones).
 
-    Parameters:
-        edf_filename (str): Name of the file in data/raw/ (e.g., 'chb01_03.edf').
-        seizure_times (list): List of (start_sec, end_sec) tuples from summary parser.
-        stride_sec (float): Step size in seconds for Preictal windows.
-                            Set to 5.0 for standard non-overlapping windows,
-                            or 1.0 for 5x overlapping minority augmentation.
-        role (str): Tag identifying whether this file belongs to 'train' or 'test'.
+def window_annotation(start, end, intervals):
+    """Half-open interval overlap; exactly 50% is ictal, touching edges is zero."""
+    overlaps = [max(0.0, min(end, off) - max(start, on)) for on, off in intervals]
+    overlap = sum(overlaps)
+    return int(overlap >= 0.5 * (end - start)), overlap, [i + 1 for i, v in enumerate(overlaps) if v > 0]
 
-    Returns:
-        df (pd.DataFrame): DataFrame where each row is a 5s window with 126 features + metadata.
-    """
-    edf_path = os.path.join(RAW_DATA_DIR, edf_filename)
-    print(f"  -> Loading & filtering '{edf_filename}'...")
-    data, sfreq, ch_names = load_and_filter_edf(edf_path)
 
-    total_samples = data.shape[1]
-    total_duration_sec = total_samples / sfreq
-    window_samples = int(WINDOW_SEC * sfreq)  # 5.0 * 256 = 1,280 samples
-
+def slice_and_extract(edf_filename, seizure_times, raw_dir=PROJECT_ROOT / "data/raw"):
+    if not re.fullmatch(r"chb\d+_\d+[a-z]?\.edf", edf_filename):
+        raise ValueError(f"Expected a CHB-MIT EDF basename: {edf_filename}")
+    data, sfreq, selected = load_and_filter_edf(Path(raw_dir) / edf_filename)
+    duration = data.shape[1] / sfreq
+    validate_seizures(seizure_times, duration)
     rows = []
-
-    # CASE A: Seizure-Free Baseline Recording (All Interictal Class 0)
-    if len(seizure_times) == 0:
-        # Step through the entire recording in non-overlapping 5-second jumps
-        for start_sec in np.arange(0, total_duration_sec - WINDOW_SEC + 0.01, WINDOW_SEC):
-            start_idx = int(start_sec * sfreq)
-            end_idx = start_idx + window_samples
-            epoch = data[:, start_idx:end_idx]
-
-            feats = extract_epoch_features(epoch, sfreq)
-            rows.append(np.append(feats, [0, start_sec, edf_filename, role]))
-
-    # CASE B: Recording Contains a Seizure
-    else:
-        onset_sec, _ = seizure_times[0]
-        preictal_start_sec = max(0.0, onset_sec - PREICTAL_HORIZON_SEC)
-
-        # 1. Extract Normal Interictal windows prior to the 30-min warning zone (5s stride)
-        for start_sec in np.arange(0, preictal_start_sec - WINDOW_SEC + 0.01, WINDOW_SEC):
-            start_idx = int(start_sec * sfreq)
-            end_idx = start_idx + window_samples
-            epoch = data[:, start_idx:end_idx]
-
-            feats = extract_epoch_features(epoch, sfreq)
-            rows.append(np.append(feats, [0, start_sec, edf_filename, role]))
-
-        # 2. Extract Preictal Warning windows inside [onset - 30 min, onset]
-        #    Uses configurable 'stride_sec' (5.0s for baseline, 1.0s for balanced training)
-        for start_sec in np.arange(preictal_start_sec, onset_sec - WINDOW_SEC + 0.01, stride_sec):
-            start_idx = int(start_sec * sfreq)
-            end_idx = start_idx + window_samples
-            epoch = data[:, start_idx:end_idx]
-
-            feats = extract_epoch_features(epoch, sfreq)
-            rows.append(np.append(feats, [1, start_sec, edf_filename, role]))
-
-    # Build human-readable column names for all 126 features
-    # Format: ChName_Feature (e.g., 'FP1-F7_var', 'FP1-F7_gamma', etc.)
-    stat_names = ["var", "line_length", "delta", "theta", "alpha", "beta", "gamma"]
-    feature_cols = [f"{ch}_{stat}" for ch in ch_names for stat in stat_names]
-    all_cols = feature_cols + ["label", "time_sec", "source_file", "split_role"]
-
-    df = pd.DataFrame(rows, columns=all_cols)
-
-    # Cast numeric columns back from string/object to float64/int64
-    for col in feature_cols + ["time_sec"]:
-        df[col] = df[col].astype(float)
-    df["label"] = df["label"].astype(int)
-
-    return df
+    for start_idx, end_idx in window_bounds(data.shape[1], sfreq):
+        start, end = start_idx / sfreq, end_idx / sfreq
+        label, overlap, ids = window_annotation(start, end, seizure_times)
+        features, low_power = extract_epoch_features(data[:, start_idx:end_idx], sfreq)
+        row = dict(zip(FEATURE_COLUMNS, features))
+        row.update(patient_id=edf_filename.split("_")[0], recording_id=Path(edf_filename).stem,
+                   source_file=edf_filename, start_sample=start_idx, end_sample=end_idx,
+                   start_sec=start, end_sec=end, decision_time_sec=end,
+                   sampling_rate_hz=sfreq, recording_duration_sec=duration,
+                   label=label, seizure_overlap_sec=overlap, seizure_overlap_fraction=overlap / WINDOW_SEC,
+                   overlapping_seizure_ids=json.dumps(ids), low_power_channel_count=low_power,
+                   filter_warmup=start < FILTER_WARMUP_SEC,
+                   postictal_60s=any(start < off + 60 and end > off for _, off in seizure_times),
+                   processing_version=PROCESSING_VERSION)
+        rows.append(row)
+    result = pd.DataFrame(rows)
+    if result.low_power_channel_count.any():
+        warnings.warn(f"{edf_filename}: {int((result.low_power_channel_count > 0).sum())} windows with near-zero-power channels")
+    return result, {"duration_sec": duration, "n_samples": data.shape[1], "sampling_rate_hz": sfreq,
+                    "selected_edf_channels": selected, "seizures_sec": seizure_times}
 
 
-# ==============================================================================
-# 7. MAIN EXECUTION PIPELINE
-# ==============================================================================
+def sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--recordings", nargs="+", default=list(DEFAULT_RECORDINGS),
+                        help="Explicit basenames of COMPLETED EDFs only; never auto-discovers files")
+    parser.add_argument("--raw-dir", type=Path, default=PROJECT_ROOT / "data/raw")
+    parser.add_argument("--summary", type=Path, default=PROJECT_ROOT / "data/raw/chb01-summary.txt")
+    parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "data/processed/chb01_detection_features.parquet")
+    args = parser.parse_args(argv)
+    if args.output.resolve() == (PROJECT_ROOT / "data/processed/chb01_features.parquet").resolve():
+        parser.error("The legacy prediction dataset must be preserved; choose a detection filename")
+    if args.output.suffix != ".parquet":
+        parser.error("Output must use .parquet extension")
+    if len(set(args.recordings)) != len(args.recordings):
+        parser.error("Duplicate recording names")
+    # Validate the entire selection before opening any EDF. No directory scan.
+    annotations = parse_summary_file(args.summary)
+    for filename in args.recordings:
+        if filename not in annotations:
+            parser.error(f"No annotations for {filename}; never assume seizure-free")
+    frames, recordings, captured = [], {}, []
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for filename in args.recordings:
+            print(f"Processing {filename}", flush=True)
+            frame, metadata = slice_and_extract(filename, annotations[filename], args.raw_dir)
+            metadata["sha256"] = sha256(args.raw_dir / filename)
+            frames.append(frame)
+            recordings[filename] = metadata
+        captured = list(dict.fromkeys(str(w.message) for w in caught))
+    table = pd.concat(frames, ignore_index=True)
+    report = {"processing_version": PROCESSING_VERSION, "label_rule": ">=50% overlap of half-open intervals",
+              "window_sec": WINDOW_SEC, "channels": CHANNELS, "bands_hz": FREQ_BANDS,
+              "filter": "scipy Butterworth order=4 bandpass 0.5-45Hz SOS forward, zero initial state per EDF; no notch",
+              "filter_warmup_flag_sec": FILTER_WARMUP_SEC, "power_floor_uv2": POWER_FLOOR_UV2,
+              "postictal_flag_sec": 60, "postictal_policy": "retained; labels determined by ictal overlap only",
+              "annotation_sha256": sha256(args.summary), "recordings": recordings,
+              "preprocessing_source_sha256": sha256(__file__), "python_version": platform.python_version(),
+              "versions": {name: importlib.metadata.version(name) for name in ("mne", "numpy", "pandas", "scipy", "pyarrow")},
+              "warnings": captured, "counts": {"windows": len(table), "ictal": int(table.label.sum()),
+                                               "nonictal": int((table.label == 0).sum())}}
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    table.to_parquet(args.output, index=False)
+    args.output.with_suffix(".json").write_text(json.dumps(report, indent=2) + "\n")
+    print(table.groupby(["source_file", "label"]).size().unstack(fill_value=0).rename(columns={0: "nonictal", 1: "ictal"}))
+    print(f"Total: {len(table)} windows; ictal {table.label.mean():.4%}")
+    print(f"Warnings: {captured or 'none'}")
+    print(f"Saved {args.output} and matching JSON provenance report")
+
+
 if __name__ == "__main__":
-    print("=================================================================")
-    print(" NYAS BrainTech: Starting CHB-MIT Preprocessing Pipeline (chb01)")
-    print("=================================================================\n")
-
-    os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
-
-    # Step 1: Parse the clinical summary text file to get ground-truth onset times
-    summary_file = os.path.join(RAW_DATA_DIR, "chb01-summary.txt")
-    seizure_map = parse_summary_file(summary_file)
-
-    print("1. Discovered Seizure Annotations from chb01-summary.txt:")
-    for fname in ["chb01_01.edf", "chb01_03.edf", "chb01_04.edf"]:
-        print(f"   - {fname}: {seizure_map.get(fname, [])}")
-    print()
-
-    # Step 2: Process our 3 recordings
-    print("2. Extracting 126 Spectral/Temporal Features per 5-second Window...")
-    
-    # Extract all 720 normal windows from chb01_01.edf
-    df_normal_all = slice_and_extract("chb01_01.edf", seizure_map["chb01_01.edf"], stride_sec=5.0, role="train")
-    
-    # Split chb01_01.edf chronologically: first 50% (360 windows) to Train, last 50% (360 windows) to Test
-    # This guarantees our Test set has plenty of normal brainwaves to measure False Alarms!
-    half_idx = len(df_normal_all) // 2
-    df_train_normal = df_normal_all.iloc[:half_idx].copy()
-    df_test_normal = df_normal_all.iloc[half_idx:].copy()
-    df_test_normal["split_role"] = "test"
-
-    # Extract Seizure #1 (chb01_03.edf) for Training, and Seizure #2 (chb01_04.edf) for Blind Testing
-    df_train_seizure = slice_and_extract("chb01_03.edf", seizure_map["chb01_03.edf"], stride_sec=5.0, role="train")
-    df_test_seizure = slice_and_extract("chb01_04.edf", seizure_map["chb01_04.edf"], stride_sec=5.0, role="test")
-
-    # Combine all splits into the master Parquet table
-    master_df = pd.concat([df_train_normal, df_test_normal, df_train_seizure, df_test_seizure], ignore_index=True)
-    output_path = os.path.join(PROCESSED_DATA_DIR, "chb01_features.parquet")
-    master_df.to_parquet(output_path, index=False)
-
-    # Step 3: Print Diagnostic Summary for the Technical Lead
-    print("\n=================================================================")
-    print(f" SUCCESS! Saved Master Feature Matrix to: {output_path}")
-    print("=================================================================")
-    print(f" Total 5-Second Windows Extracted : {len(master_df)}")
-    print(f" Total Features per Window        : 126 (18 channels x 7 stats)")
-    print("\n Class Breakdown by Split:")
-    print(master_df.groupby(["split_role", "label"]).size().unstack(fill_value=0).rename(
-        columns={0: "Class 0 (Interictal Normal)", 1: "Class 1 (Preictal Warning)"}
-    ))
-    print("=================================================================\n")
+    main()
