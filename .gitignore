@@ -9,3 +9,17 @@ data/raw/*.seizures
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !models/.gitkeep
+
+# EEG datasets and generated processing outputs
+/data/raw/
+/data/processed/
+
+# Generated experiment results and models
+/results/
+/models/*.joblib
+/models/*.pkl
+
+# Python environment and cache
+/venv/
+__pycache__/
+*.py[cod]

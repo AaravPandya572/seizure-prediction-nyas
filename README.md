@@ -1,7 +1,7 @@
 # EEG seizure detection: Week 1 preprocessing
 
 Offline research project using CHB-MIT clinical scalp EEG. The preprocessing
-produces **ictal versus nonictal** features; no model or alerts are trained here.
+produces **ictal versus nonictal** features. Phase 2B adds offline baseline models.
 The original preictal pipeline is preserved in Git commit `4454197`.
 
 ## Run on the existing Apple Silicon environment
@@ -110,3 +110,11 @@ The reproducible assignments are in `config/chb01_recordings.csv`.
 Use `chb01_detection_features_11recordings_split.parquet` for later development;
 its `split` column reserves `chb01_21`, `chb01_22`, and `chb01_26` for final testing.
 The older three-recording and prediction outputs are preserved.
+
+## Initial baseline experiment (Phase 2B)
+
+The majority-class DummyClassifier and unweighted 200-tree Random Forest train
+only on the fixed training recordings and evaluate validation only. See the
+[baseline experiment report](docs/baseline_experiment.md) for exact feature
+selection, model settings, measured results, saved artifacts and reproduction
+commands. The test recordings remain reserved for final evaluation.
