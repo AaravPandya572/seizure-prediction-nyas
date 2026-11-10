@@ -118,3 +118,61 @@ only on the fixed training recordings and evaluate validation only. See the
 [baseline experiment report](docs/baseline_experiment.md) for exact feature
 selection, model settings, measured results, saved artifacts and reproduction
 commands. The test recordings remain reserved for final evaluation.
+
+## Class-weight comparison (Phase 2C)
+
+The [controlled weighted-forest report](docs/weighted_experiment.md) compares the
+saved ordinary forest with one otherwise identical `class_weight="balanced"`
+forest. It includes validation results, window changes, alarm times, limitations
+and reproduction commands. New artifacts are in `results/rf_weighted_v1/`.
+
+## Training-only RF stability analysis (Phase 2D)
+
+The [four-fold cross-validation report](docs/rf_cross_validation.md) compares
+ordinary and balanced forests while holding out each seizure-containing training
+recording. It includes exact folds, metrics, alarm times, limitations and
+reproduction commands. Outputs are in `results/rf_cv_v1/`. Original validation/test
+recordings and new supplementary EDFs are excluded.
+
+## Missed-seizure failure analysis (Phase 2E)
+
+The [analysis-only report](docs/failure_analysis.md) investigates `chb01_15`
+using saved out-of-fold predictions and existing features. Figures and numerical
+tables are in `results/failure_analysis_v1/`; models and evaluation rules are unchanged.
+
+## Targeted raw EEG investigation (Phase 2F)
+
+The [raw EEG investigation](docs/raw_eeg_investigation.md) inspects the missed
+seizure and delayed alarm using original and causally filtered EEG, absolute
+power measurements and matched training-recording examples. Figures and checks
+are in `results/raw_eeg_investigation_v1/`. Existing models and definitions are unchanged.
+
+## Fixed LightGBM comparison (Phase 2G)
+
+The [four-model validation report](docs/lightgbm_experiment.md) compares two fixed
+LightGBM classifiers with saved ordinary/weighted Random Forest results. It records
+the minimal ARM64 installation, exact parameters, window and alarm comparisons,
+limitations and commands. New outputs are in `results/lightgbm_v1/`; test and
+supplementary recordings remain reserved.
+
+## Training-only LightGBM stability (Phase 2H)
+
+The [LightGBM cross-validation report](docs/lightgbm_cross_validation.md) compares
+four fixed classifiers on identical held-out training recordings, including
+fold-local weights, complete alarm ledgers, pooled/macro metrics and limitations.
+New artifacts are in `results/lightgbm_cv_v1/`. Reserved recordings remain excluded.
+
+## Causal temporal filtering (Phase 3A)
+
+The [fixed temporal-rule report](docs/temporal_filtering.md) compares no filtering,
+two consecutive positives and two of the latest three decisions for ordinary RF
+and LightGBM. Saved CV predictions are primary; original validation is secondary.
+Outputs are in `results/temporal_filtering_v1/`. No model is retrained.
+
+## Frozen final evaluation protocol (Phase 3B)
+
+The [final protocol](docs/final_evaluation_protocol.md) fixes the saved ordinary
+LightGBM primary model, Random Forest reference, feature order, threshold and
+alarm definitions. Exact parameters, hashes and versions are in
+`config/final_evaluation_protocol.json`. Final-test and supplementary evaluation
+remain pending separate authorization; the proposed commands are documented only.

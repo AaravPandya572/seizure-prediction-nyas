@@ -1,0 +1,521 @@
+{
+  "protocol_id": "nyas-p01-final-evaluation-v1",
+  "protocol_date": "2026-11-10",
+  "timezone": "Asia/Kolkata",
+  "status": "frozen; final test pending subsequent explicit human authorization",
+  "git": {
+    "head": "a1359fa4b64f94dd4eab45c82b1d03952f3d79f6",
+    "branch": "main",
+    "dirty": true,
+    "status_before_protocol_files": [
+      " M README.md",
+      " M requirements.txt",
+      "?? docs/failure_analysis.md",
+      "?? docs/lightgbm_cross_validation.md",
+      "?? docs/lightgbm_experiment.md",
+      "?? docs/raw_eeg_investigation.md",
+      "?? docs/rf_cross_validation.md",
+      "?? docs/temporal_filtering.md",
+      "?? docs/weighted_experiment.md",
+      "?? src/failure_analysis.py",
+      "?? src/lightgbm_cross_validation.py",
+      "?? src/lightgbm_experiment.py",
+      "?? src/raw_eeg_investigation.py",
+      "?? src/rf_cross_validation.py",
+      "?? src/temporal_filter.py",
+      "?? src/temporal_filter_experiment.py",
+      "?? src/weighted_rf.py",
+      "?? tests/test_failure_analysis.py",
+      "?? tests/test_lightgbm_cross_validation.py",
+      "?? tests/test_lightgbm_experiment.py",
+      "?? tests/test_raw_eeg_investigation.py",
+      "?? tests/test_rf_cross_validation.py",
+      "?? tests/test_temporal_filter.py",
+      "?? tests/test_weighted_rf.py"
+    ],
+    "identification_note": "HEAD alone does not identify uncommitted development; source/test hashes also required"
+  },
+  "models": {
+    "primary": {
+      "id": "ordinary_lightgbm_phase2g",
+      "artifact": {
+        "path": "results/lightgbm_v1/ordinary_lgbm.joblib",
+        "sha256": "7324d3199850abd2e78d9190ff08946ecfd056e1a32e4b5d0f901d519b7b2b5f"
+      },
+      "native_archive": {
+        "path": "results/lightgbm_v1/ordinary_lgbm.txt",
+        "sha256": "59cf62e6e74316288fcff37dfdfd58761202b522093313ee239df22f8d2e0183"
+      },
+      "training_configuration": {
+        "path": "results/lightgbm_v1/configuration.json",
+        "sha256": "c53682449811e2aafb57fd1dc0b11601f78b68288b78854b8a96e2fbee58bb9e"
+      },
+      "parameters": {
+        "boosting_type": "gbdt",
+        "class_weight": null,
+        "colsample_bytree": 1.0,
+        "importance_type": "split",
+        "learning_rate": 0.05,
+        "max_depth": 3,
+        "min_child_samples": 10,
+        "min_child_weight": 0.001,
+        "min_split_gain": 0.0,
+        "n_estimators": 150,
+        "n_jobs": 4,
+        "num_leaves": 7,
+        "objective": "binary",
+        "random_state": 42,
+        "reg_alpha": 0.0,
+        "reg_lambda": 0.0,
+        "subsample": 1.0,
+        "subsample_for_bin": 200000,
+        "subsample_freq": 0,
+        "scale_pos_weight": 1.0,
+        "deterministic": true,
+        "force_col_wise": true,
+        "verbosity": -1
+      },
+      "actual_trees": 150,
+      "training_recordings": [
+        "chb01_01",
+        "chb01_03",
+        "chb01_04",
+        "chb01_14",
+        "chb01_15",
+        "chb01_16"
+      ]
+    },
+    "reference": {
+      "id": "ordinary_random_forest_phase2b",
+      "artifact": {
+        "path": "results/baseline_v1/random_forest.joblib",
+        "sha256": "05fb53387283e82892aed6885469070fc85782f2155b460ba6b91cc4534d60c0"
+      },
+      "training_configuration": {
+        "path": "results/baseline_v1/configuration.json",
+        "sha256": "562837c804288d0f9c9758ffb965b8a67ad4ad0046b881027a71f9f50991dc56"
+      },
+      "parameters": {
+        "bootstrap": true,
+        "ccp_alpha": 0.0,
+        "class_weight": null,
+        "criterion": "gini",
+        "max_depth": null,
+        "max_features": "sqrt",
+        "max_leaf_nodes": null,
+        "max_samples": null,
+        "min_impurity_decrease": 0.0,
+        "min_samples_leaf": 1,
+        "min_samples_split": 2,
+        "min_weight_fraction_leaf": 0.0,
+        "monotonic_cst": null,
+        "n_estimators": 200,
+        "n_jobs": 4,
+        "oob_score": false,
+        "random_state": 42,
+        "verbose": 0,
+        "warm_start": false
+      },
+      "actual_trees": 200,
+      "training_recordings": [
+        "chb01_01",
+        "chb01_03",
+        "chb01_04",
+        "chb01_14",
+        "chb01_15",
+        "chb01_16"
+      ]
+    }
+  },
+  "development": {
+    "training_recordings": [
+      "chb01_01",
+      "chb01_03",
+      "chb01_04",
+      "chb01_14",
+      "chb01_15",
+      "chb01_16"
+    ],
+    "validation_recordings": [
+      "chb01_17",
+      "chb01_18"
+    ],
+    "training_windows": 4320,
+    "training_nonictal": 4288,
+    "training_ictal": 32,
+    "training_events": 4,
+    "ordered_training_inputs_sha256": "9e238086a6b2b977a534468748e0616f2b0388d01395fc9439179865d636c699",
+    "refit_policy": "Use the two existing artifacts; no train+validation refit, automatic fallback or retraining"
+  },
+  "data": {
+    "features": {
+      "path": "data/processed/chb01_detection_features_11recordings_split.parquet",
+      "sha256": "957cda683c9f09f1912e22d264f715904861e3bb8ab044d657485d13ef121ae0"
+    },
+    "split_audit": {
+      "path": "data/processed/chb01_detection_features_11recordings_split.json",
+      "sha256": "2ecc657f3e03fb8c52839a328a7a56a394414444f5b89daf65c013984b6cbd0b"
+    },
+    "manifest": {
+      "path": "config/chb01_recordings.csv",
+      "sha256": "536efb546faa62f1ff1f57fd8f7814552bc0975dded7163832191c02f9670a8e"
+    },
+    "annotation_source": {
+      "path": "data/raw/chb01-summary.txt",
+      "sha256": "77e86183845192d147c88a9bb4263c2b4a32e936c6236029770f86ca2ea023db"
+    }
+  },
+  "assessments": {
+    "primary": {
+      "recordings": [
+        "chb01_21",
+        "chb01_22",
+        "chb01_26"
+      ],
+      "required_split": "test",
+      "output_directory": "results/final_test_v1",
+      "report_separately": true
+    },
+    "supplementary": {
+      "recordings": [
+        "chb01_23",
+        "chb01_24",
+        "chb01_25"
+      ],
+      "purpose": "separately reported seizure-free false-alarm assessment",
+      "status": "not preprocessed/evaluated; requires later authorization and provenance verification",
+      "proposed_features_path": "data/processed/chb01_supplementary_features_v1.parquet",
+      "output_directory": "results/supplementary_false_alarms_v1",
+      "merge_into_primary": false
+    }
+  },
+  "features": {
+    "columns": [
+      "FP1-F7_var",
+      "FP1-F7_line_length",
+      "FP1-F7_delta",
+      "FP1-F7_theta",
+      "FP1-F7_alpha",
+      "FP1-F7_beta",
+      "FP1-F7_gamma",
+      "F7-T7_var",
+      "F7-T7_line_length",
+      "F7-T7_delta",
+      "F7-T7_theta",
+      "F7-T7_alpha",
+      "F7-T7_beta",
+      "F7-T7_gamma",
+      "T7-P7_var",
+      "T7-P7_line_length",
+      "T7-P7_delta",
+      "T7-P7_theta",
+      "T7-P7_alpha",
+      "T7-P7_beta",
+      "T7-P7_gamma",
+      "P7-O1_var",
+      "P7-O1_line_length",
+      "P7-O1_delta",
+      "P7-O1_theta",
+      "P7-O1_alpha",
+      "P7-O1_beta",
+      "P7-O1_gamma",
+      "FP1-F3_var",
+      "FP1-F3_line_length",
+      "FP1-F3_delta",
+      "FP1-F3_theta",
+      "FP1-F3_alpha",
+      "FP1-F3_beta",
+      "FP1-F3_gamma",
+      "F3-C3_var",
+      "F3-C3_line_length",
+      "F3-C3_delta",
+      "F3-C3_theta",
+      "F3-C3_alpha",
+      "F3-C3_beta",
+      "F3-C3_gamma",
+      "C3-P3_var",
+      "C3-P3_line_length",
+      "C3-P3_delta",
+      "C3-P3_theta",
+      "C3-P3_alpha",
+      "C3-P3_beta",
+      "C3-P3_gamma",
+      "P3-O1_var",
+      "P3-O1_line_length",
+      "P3-O1_delta",
+      "P3-O1_theta",
+      "P3-O1_alpha",
+      "P3-O1_beta",
+      "P3-O1_gamma",
+      "FP2-F4_var",
+      "FP2-F4_line_length",
+      "FP2-F4_delta",
+      "FP2-F4_theta",
+      "FP2-F4_alpha",
+      "FP2-F4_beta",
+      "FP2-F4_gamma",
+      "F4-C4_var",
+      "F4-C4_line_length",
+      "F4-C4_delta",
+      "F4-C4_theta",
+      "F4-C4_alpha",
+      "F4-C4_beta",
+      "F4-C4_gamma",
+      "C4-P4_var",
+      "C4-P4_line_length",
+      "C4-P4_delta",
+      "C4-P4_theta",
+      "C4-P4_alpha",
+      "C4-P4_beta",
+      "C4-P4_gamma",
+      "P4-O2_var",
+      "P4-O2_line_length",
+      "P4-O2_delta",
+      "P4-O2_theta",
+      "P4-O2_alpha",
+      "P4-O2_beta",
+      "P4-O2_gamma",
+      "FP2-F8_var",
+      "FP2-F8_line_length",
+      "FP2-F8_delta",
+      "FP2-F8_theta",
+      "FP2-F8_alpha",
+      "FP2-F8_beta",
+      "FP2-F8_gamma",
+      "F8-T8_var",
+      "F8-T8_line_length",
+      "F8-T8_delta",
+      "F8-T8_theta",
+      "F8-T8_alpha",
+      "F8-T8_beta",
+      "F8-T8_gamma",
+      "T8-P8_var",
+      "T8-P8_line_length",
+      "T8-P8_delta",
+      "T8-P8_theta",
+      "T8-P8_alpha",
+      "T8-P8_beta",
+      "T8-P8_gamma",
+      "P8-O2_var",
+      "P8-O2_line_length",
+      "P8-O2_delta",
+      "P8-O2_theta",
+      "P8-O2_alpha",
+      "P8-O2_beta",
+      "P8-O2_gamma",
+      "FZ-CZ_var",
+      "FZ-CZ_line_length",
+      "FZ-CZ_delta",
+      "FZ-CZ_theta",
+      "FZ-CZ_alpha",
+      "FZ-CZ_beta",
+      "FZ-CZ_gamma",
+      "CZ-PZ_var",
+      "CZ-PZ_line_length",
+      "CZ-PZ_delta",
+      "CZ-PZ_theta",
+      "CZ-PZ_alpha",
+      "CZ-PZ_beta",
+      "CZ-PZ_gamma"
+    ],
+    "count": 126,
+    "channels": [
+      "FP1-F7",
+      "F7-T7",
+      "T7-P7",
+      "P7-O1",
+      "FP1-F3",
+      "F3-C3",
+      "C3-P3",
+      "P3-O1",
+      "FP2-F4",
+      "F4-C4",
+      "C4-P4",
+      "P4-O2",
+      "FP2-F8",
+      "F8-T8",
+      "T8-P8",
+      "P8-O2",
+      "FZ-CZ",
+      "CZ-PZ"
+    ],
+    "window_sec": 5.0,
+    "stride_sec": 5.0,
+    "sampling_rate_hz": 256.0,
+    "per_channel": [
+      "variance_uv2",
+      "line_length_uv",
+      "delta",
+      "theta",
+      "alpha",
+      "beta",
+      "gamma"
+    ],
+    "relative_psd_denominator_hz": [
+      0.5,
+      45.0
+    ],
+    "scaling_or_new_transform": null,
+    "metadata_predictors": false
+  },
+  "preprocessing": {
+    "processing_version": "detection-v1",
+    "causal_filter": "existing fourth-order Butterworth 0.5-45Hz SOS, zero state per file, continuous forward filtering",
+    "notch": false,
+    "welch": "2s Hann; 1s overlap; constant detrending; 0.5Hz bin sums",
+    "band_edges_hz": {
+      "delta": [
+        0.5,
+        4
+      ],
+      "theta": [
+        4,
+        8
+      ],
+      "alpha": [
+        8,
+        13
+      ],
+      "beta": [
+        13,
+        30
+      ],
+      "gamma": [
+        30,
+        45
+      ]
+    },
+    "band_endpoints": "half-open except gamma includes 45Hz",
+    "power_floor_uv2": 1e-12,
+    "duplicate_channel": "canonical T8-P8 uses first duplicate T8-P8-0",
+    "warmup_and_postictal": "retained; quality flags are metadata, not predictors",
+    "label": "1 iff >=50% overlap with union of validated half-open ictal intervals",
+    "partial_tail": "existing preprocessing drops an incomplete tail with warning; evaluator requires complete coverage, so stop for review if any assessment has incomplete coverage"
+  },
+  "decisions": {
+    "positive_class": 1,
+    "threshold": 0.5,
+    "comparison": ">",
+    "class_at_exact_tie": 0,
+    "implementation": "model.predict and score from predict_proba[:,1], classes=[0,1]",
+    "timestamp": "actual end_sec; decision_time_sec=end_sec",
+    "temporal_filter": null,
+    "probability_calibration": null
+  },
+  "evaluation": {
+    "module": "src/evaluate.py",
+    "window_metrics": [
+      "accuracy",
+      "precision",
+      "recall",
+      "specificity",
+      "f1",
+      "average_precision",
+      "confusion_matrix"
+    ],
+    "confusion_order": "rows=true, columns=predicted; [0,1]; [[TN,FP],[FN,TP]]",
+    "average_precision": "existing step-weighted AP on unmodified positive-class model scores",
+    "event_metrics": [
+      "n_seizures",
+      "n_detected",
+      "n_missed",
+      "false_alarms_per_hour",
+      "latencies_sec",
+      "n_repeat_alarms",
+      "alarms"
+    ],
+    "new_alarm": "first positive decision while inactive; consecutive positive decisions form one episode",
+    "rearm": "one negative decision ends episode and re-arms; no cooldown",
+    "match": "new alarm start >=onset and <offset; no early tolerance or late grace",
+    "repeat": "further starts within the same event; do not count as new seizures or false alarms",
+    "pre_onset_alarm": "an already-active alarm cannot detect a later event",
+    "false_alarm_denominator": "total evaluated EEG hours including ictal time; no unrecorded gaps",
+    "latency": "first matching alarm start minus onset; missed events have null latency",
+    "aggregation": "per recording and pooled counts over each recording once, separately per assessment/model",
+    "undefined": "JSON null plus reason; never force zero; supplementary sensitivity, latency, recall and AP undefined when no positive truth",
+    "coverage": "complete chronological contiguous recordings, no duplicate/missing windows; all states reset between files"
+  },
+  "software": {
+    "python": "3.14.5",
+    "platform": "macOS-26.3.2-arm64-arm-64bit-Mach-O",
+    "architecture": "arm64",
+    "packages": {
+      "lightgbm": "4.7.0",
+      "numpy": "2.5.4",
+      "pandas": "3.0.6",
+      "scipy": "1.18.1",
+      "scikit-learn": "1.9.1",
+      "joblib": "1.6.0",
+      "pyarrow": "26.0.0",
+      "matplotlib": "3.11.2",
+      "mne": "1.13.2"
+    },
+    "libomp": {
+      "path": "/opt/homebrew/Cellar/libomp/23.1.4/lib/libomp.dylib",
+      "version": "23.1.4",
+      "sha256": "432b8d15fc1b2431f937bba89796a32daaa2dd464eda12a744d9cb2818842477"
+    },
+    "lightgbm_native_library": {
+      "path": "/Users/aaravpandya/seizure-prediction-nyas/venv/lib/python3.14/site-packages/lightgbm/lib/lib_lightgbm.dylib",
+      "sha256": "bc392db609d97730a9ed2acec7a56529b356c03dfad39bebf689523fed7dff18"
+    }
+  },
+  "integrity": {
+    "source_sha256": {
+      "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "src/baseline_rf.py": "9e29d6605dc321c47e28a388b6a3e76a728f2bb19859c0574d028ae59e084e1b",
+      "src/eegnet_model.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "src/evaluate.py": "57500d550aafd9c7f4bfac9416164e1e221dc4b11cdff16d3ddd2a50e09d2c40",
+      "src/failure_analysis.py": "22955b78693ec49f782f94913e59eac72d4c35a1ab14372038c756d69899f6a9",
+      "src/lightgbm_cross_validation.py": "4758b4f228468160dc5cbe5202194d03cbd775c1919320954dca4640e3b70945",
+      "src/lightgbm_experiment.py": "51909d219355cfe05ce89f00f72af43b357d942c93ea2c22227c84ee1cdc8b3b",
+      "src/preprocess.py": "e342183308eab0699f35c77afab56f45fd43c5bade6197f54b49a416fbb7865b",
+      "src/raw_eeg_investigation.py": "fd6041e7795157c59c4f514ce301eec94630f43bc7d2615e71cf960aee669512",
+      "src/rf_cross_validation.py": "307d59f2f980867330f92d119446a6c77f2819b2a8bd3548b9bc3df9b8b7aafe",
+      "src/split_dataset.py": "c3728172d0e0e2fa6212397ecfa0039ab1bb499fbbace782bf00c21a21375475",
+      "src/temporal_filter.py": "6b9dde05a7662d3fb699888969978e53bc8fb0af9b98d4fc84420a1c681209b1",
+      "src/temporal_filter_experiment.py": "314c6acd68965853ae288b867cf920a34ae9ce5fd9849ec86a0886ef6b9a265c",
+      "src/train_eegnet.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "src/weighted_rf.py": "6dc836d293f584c489a41d06abf1adac82b800bae4d334802fd7f21256d14480"
+    },
+    "test_source_sha256": {
+      "tests/test_baseline_rf.py": "755c29f7328576a25e669fc081d5fa093f221a53b16599961309cfc4697e22fd",
+      "tests/test_evaluate.py": "87d9f416f7f93d4c227917208eb4db48fbf0885a5668997fa4e9a98e82bfae6f",
+      "tests/test_failure_analysis.py": "4762f6ce58f979d925a642b201aeef2236edb6e9e6bebd2c8d147a2d301557b1",
+      "tests/test_lightgbm_cross_validation.py": "2e6c3abc0b5918a8bc6346a7acec1c9f4ca8ab942b1f1a729fb0d63090d6147a",
+      "tests/test_lightgbm_experiment.py": "ebad78f51f4578824570c03fdaad81fc81a5276111a542eec846d3c798423d3d",
+      "tests/test_preprocess.py": "ba5823e1abb6802837df3ae940829f728b73c1e6d377948504a6aff237e68c0f",
+      "tests/test_raw_eeg_investigation.py": "169af7d04cdd2d0901156b469f41d2073b2f9b775725d4e5bafde7916240581c",
+      "tests/test_rf_cross_validation.py": "8b2ab5ad8d3256bcdbedfc0c543cc9299adfee083541587ad5f15312d06132f2",
+      "tests/test_split_dataset.py": "0b9876e4a34f2212596f89606b1b02591c074df6205212de992832a454eb7f37",
+      "tests/test_temporal_filter.py": "dd5c1f209467c64d23c49b023237c59701de121094fd456787e29cf1951d68eb",
+      "tests/test_weighted_rf.py": "ae8843df4a55d555f3d3630713ee83da146db615db29c5ba6089bb4488661fcf"
+    },
+    "requirements": {
+      "path": "requirements.txt",
+      "sha256": "d014c3d559317a3a7276dd6e1ee4c4261e3d9feabe8ce759a3910b23323dd78f"
+    },
+    "gitignore": {
+      "path": ".gitignore",
+      "sha256": "b52efde7009e1ed156b762e68dc352915dfe3e14eb06a45d504bd6976e72f41b"
+    },
+    "no_generated_datasets_models_or_environment_tracked": true
+  },
+  "verification": {
+    "selected_model_reload": "passed",
+    "feature_order": "exact canonical 126",
+    "historical_validation_outputs": "reproduced without new model fitting; only previously evaluated validation rows used",
+    "training_scope_evidence": "saved training configurations/source/data hashes, training IDs/counts, LightGBM original fit-input fingerprint, RF root training sample count 4320",
+    "sample_id_limit": "Serialized RF does not store row identities; its exact row fingerprint is reconstructed from verified data/configuration, not embedded in the original model",
+    "tests_passed": 111,
+    "tests_skipped": 1,
+    "skipped_reason": "existing expanded-data integration test decodes final-test rows",
+    "final_test_predictions_generated": false,
+    "supplementary_evaluated": false
+  },
+  "reporting": {
+    "primary_and_reference": "report both predefined models, all recordings and pooled metrics; do not pick a winner from test outcomes",
+    "after_outcomes": "no parameter/threshold/filter/annotation adjustment on final results; changes require a new development protocol and independent evaluation",
+    "uncertainty": "one patient, few correlated events; final split is recording-held-out, not patient-independent or prospective clinical validation"
+  }
+}
